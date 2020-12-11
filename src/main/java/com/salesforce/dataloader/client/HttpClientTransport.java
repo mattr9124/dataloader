@@ -27,6 +27,11 @@ package com.salesforce.dataloader.client;
 
 import java.io.*;
 import java.net.*;
+import java.security.KeyManagementException;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.cert.CertificateException;
+import java.security.cert.X509Certificate;
 import java.util.HashMap;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
@@ -38,6 +43,9 @@ import org.apache.http.client.CredentialsProvider;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpHead;
 import org.apache.http.client.methods.HttpPost;
+import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
+import org.apache.http.conn.ssl.TrustSelfSignedStrategy;
+import org.apache.http.conn.ssl.TrustStrategy;
 import org.apache.http.entity.ByteArrayEntity;
 
 import com.sforce.ws.ConnectorConfig;
@@ -47,6 +55,7 @@ import com.sforce.ws.transport.*;
 import org.apache.http.impl.client.BasicCredentialsProvider;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
+import org.apache.http.ssl.SSLContextBuilder;
 
 /**
  * This class implements the Transport interface for WSC with HttpClient in order to properly work
@@ -118,6 +127,10 @@ public class HttpClientTransport implements Transport {
             httpClientBuilder.setDefaultCredentialsProvider(credentialsprovider);
         }
 
+        if (Boolean.valueOf(System.getProperty("skip.ssl"))) {
+            skipSSLValidation(httpClientBuilder);
+        }
+
         try (CloseableHttpClient httpClient = httpClientBuilder.build()) {
 
             byte[] entityBytes = entityByteOut.toByteArray();
@@ -151,6 +164,20 @@ public class HttpClientTransport implements Transport {
             }
         }
         return input;
+    }
+
+    private void skipSSLValidation(HttpClientBuilder httpClientBuilder) {
+        System.out.println("WARNING: Skipping SSL validation");
+
+        SSLContextBuilder builder = new SSLContextBuilder();
+        try {
+            builder.loadTrustMaterial(null, (TrustStrategy) (x509Certificates, s) -> true);
+            SSLConnectionSocketFactory socketFactory = new SSLConnectionSocketFactory(builder.build());
+
+            httpClientBuilder.setSSLSocketFactory(socketFactory);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
     @Override
