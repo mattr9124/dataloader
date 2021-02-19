@@ -44,7 +44,8 @@ import java.util.TreeSet;
 
 import org.apache.commons.beanutils.DynaBean;
 import org.apache.commons.beanutils.DynaProperty;
-import org.apache.log4j.Logger;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 
 import com.salesforce.dataloader.action.progress.ILoaderProgress;
 import com.salesforce.dataloader.config.Config;
@@ -74,7 +75,7 @@ import com.sforce.async.CSVReader;
  */
 public class BulkLoadVisitor extends DAOLoadVisitor {
 
-    private static final Logger logger = Logger.getLogger(BulkLoadVisitor.class);
+    private static final Logger logger = LogManager.getLogger(BulkLoadVisitor.class);
 
     private static final String SUCCESS_RESULT_COL = "Success";
     private static final String ERROR_RESULT_COL = "Error";
@@ -219,7 +220,7 @@ public class BulkLoadVisitor extends DAOLoadVisitor {
             writeColumnToCsv(out, col);
         } else {
             // all null values should be ignored when using bulk API
-            getLogger().warn(Messages.getMessage(getClass(), "noFieldVal", fieldName));
+            getLogger().debug(Messages.getMessage(getClass(), "noFieldVal", fieldName));
         }
     }
 
@@ -281,7 +282,7 @@ public class BulkLoadVisitor extends DAOLoadVisitor {
         super.flushRemaining();
         if (this.jobUtil.hasJob()) {
             try {
-                this.jobUtil.closeJob();
+                this.jobUtil.awaitCompletionAndCloseJob();
             } catch (final AsyncApiException e) {
                 logger.warn("Failed to close job", e);
             }

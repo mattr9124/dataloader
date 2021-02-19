@@ -51,8 +51,10 @@ import com.sforce.soap.partner.DescribeGlobalSObjectResult;
 import com.sforce.soap.partner.DescribeSObjectResult;
 import com.sforce.ws.ConnectionException;
 
-import org.apache.log4j.Logger;
-import org.apache.log4j.xml.DOMConfigurator;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
+import  org.apache.logging.log4j.core.LoggerContext;
+
 
 import java.io.File;
 import java.io.IOException;
@@ -82,12 +84,15 @@ import javax.xml.parsers.FactoryConfigurationError;
 public class Controller {
 
     private static final String LOG_CONF_OVERRIDE = "log-conf.xml";
+
     private static boolean isLogInitialized = false; // make sure log is initialized only once
+    private static boolean areStaticVarsInitialized = false; // make sure log is initialized only once
 
     /**
      * the system property name used to determine the config directory
      */
     public static final String CONFIG_DIR_PROP = "salesforce.config.dir";
+    public static final String CONFIG_DIR_DEFAULT_VALUE = "configs";
 
     public static final String CONFIG_FILE = "config.properties"; //$NON-NLS-1$
     public static final String DEFAULT_CONFIG_FILE = "defaultConfig.properties"; //$NON-NLS-1$
@@ -113,7 +118,7 @@ public class Controller {
     private PartnerClient partnerClient;
 
     // logger
-    private static Logger logger = Logger.getLogger(Controller.class);
+    private static Logger logger;
     private String appPath;
 
     private Controller(String name, boolean isBatchMode, String[] args) throws ControllerInitializationException {
@@ -143,7 +148,10 @@ public class Controller {
                 argNameValuePair.get(CONFIG_DIR_PROP) : null;
     }
 
-    public static void initStaticVariable() throws ControllerInitializationException {
+    private static synchronized void initStaticVariable() throws ControllerInitializationException {
+        if (areStaticVarsInitialized) {
+            return;
+        }
         Properties versionProps = new Properties();
         try {
             versionProps.load(Controller.class.getClassLoader().getResourceAsStream("com/salesforce/dataloader/version.properties"));
@@ -155,11 +163,16 @@ public class Controller {
         // FIXME clean this up, make static
         // dataloader version has 3 parts, salesforce app api version should match first two parts
         APP_VERSION = versionProps.getProperty("dataloader.version");
-        String[] dataloaderVersion = APP_VERSION.split("\\.");
-        API_VERSION = dataloaderVersion[0] + "." + dataloaderVersion[1];
+        String apiVersionStr = versionProps.getProperty("dataloader.apiversion");
+        if ( apiVersionStr == null || apiVersionStr.isEmpty()) {
+            apiVersionStr = APP_VERSION;
+        }
+        String[] apiVersion = apiVersionStr.split("\\.");
+        API_VERSION = apiVersion[0] + "." + apiVersion[1];
 
 
         OS_TYPE = AppUtil.getOSType();
+        areStaticVarsInitialized = true;
     }
 
     public void setConfigDefaults() {
@@ -371,8 +384,8 @@ public class Controller {
         File configDir;
 
         if (configDirPath == null) {
-            // CONFIG_DIR_PROP param is NOT provided - use user's config dir
-            configDir = Paths.get(System.getProperty("user.dir"), "configs").toFile();
+            // CONFIG_DIR_PROP param is NOT provided through command line or system property - use user's config dir
+            configDir = Paths.get(System.getProperty("user.dir"), CONFIG_DIR_DEFAULT_VALUE).toFile();
             logger.debug(String.format("OS: %s, '%s' NOT provided, setting config dir to : %s", OS_TYPE, CONFIG_DIR_PROP, configDir));
         } else {
             // CONFIG_DIR_PROP is provided - use provided config dir
@@ -432,10 +445,10 @@ public class Controller {
         try {
             String lastRunFileName = name + LAST_RUN_FILE_SUFFIX;
             config = new Config(getAppPath(), configPath, lastRunFileName);
-            // set default before actual values are loaded
+            config.load();
+            // set default - it does not override loaded values
             config.setDefaults();
             config.setBatchMode(isBatchMode);
-            config.load();
             logger.info(Messages.getMessage(getClass(), "configInit")); //$NON-NLS-1$
         } catch (IOException e) {
             throw new ControllerInitializationException(Messages.getMessage(getClass(), "errorConfigLoad", configPath), e);
@@ -455,31 +468,41 @@ public class Controller {
         return APP_NAME + " " + APP_VERSION;
     }
 
-    public static synchronized void initLog() throws FactoryConfigurationError {
-
+    public static synchronized void initLog() throws FactoryConfigurationError, ControllerInitializationException {
         // init the log if not initialized already
         if (Controller.isLogInitialized) {
             return;
         }
 
         try {
-            File logConfXml = Paths.get(System.getProperty("user.dir"), "configs", LOG_CONF_OVERRIDE).toFile();
-            if (logConfXml.exists()) {
-                logger.info("Reading log-conf.xml in " + logConfXml.getAbsolutePath());
-                if (logConfXml.canRead()) {
-                    DOMConfigurator.configure(logConfXml.getAbsolutePath());
-                } else {
-                    logger.warn("Unable to read log-conf.xml in " + logConfXml.getAbsolutePath());
-                }
-            } else {
-                logger.info("Using built-in logging configuration, no log-conf.xml in " + logConfXml.getAbsolutePath());
-            }
-            logger.info(Messages.getString("Controller.logInit")); //$NON-NLS-1$
-        } catch (Exception ex) {
-            logger.error(Messages.getString("Controller.errorLogInit")); //$NON-NLS-1$
-            logger.error(ex);
-            System.exit(1);
+            initStaticVariable();
+        } catch (ControllerInitializationException ex) {
+            System.out.println("Controller.initLog(): Unable to initialize Controller static vars: " + ex.getMessage());
+            throw ex;
         }
+
+        String log4jConfigFile = System.getenv(
+                "LOG4J_CONFIGURATION_FILE");
+        if (log4jConfigFile == null || log4jConfigFile.isEmpty()) { // use the override
+            File logConfXml = Paths.get(System.getProperty("user.dir"), "configs", LOG_CONF_OVERRIDE).toFile();
+            log4jConfigFile =  logConfXml.getAbsolutePath();
+            if (logConfXml.exists()) {
+                System.setProperty("log4j2.configurationFile", log4jConfigFile);
+            }
+        }
+
+        logger = LogManager.getLogger(Controller.class);
+        LoggerContext context = (LoggerContext) LogManager.getContext();
+        String logConfigLocation = context.getConfiguration().getConfigurationSource().getLocation();
+        if (logConfigLocation == null) {
+            logger.error("Unable to initialize logging using log4j2 config file at "
+                    + log4jConfigFile
+                    + ". All error messages will be logged on STDOUT.");
+        } else {
+            logger.info("Using log4j2 configuration file at location: " + logConfigLocation);
+        }
+
+        logger.info(Messages.getString("Controller.logInit")); //$NON-NLS-1$
         Controller.isLogInitialized = true;
     }
 

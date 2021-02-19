@@ -2,8 +2,11 @@
 setlocal
 
 set DATALOADER_VERSION=@@FULL_VERSION@@
-set DATALOADER_SHORT_VERSION=@@SHORT_VERSION@@
-set DATALOADER_UBER_JAR_NAME=dataloader-@@FULL_VERSION@@-uber.jar
+for /f "tokens=1 delims=." %%a in ("%DATALOADER_VERSION%") do (
+  set DATALOADER_SHORT_VERSION=%%a
+)
+set DATALOADER_UBER_JAR_NAME=dataloader-%DATALOADER_VERSION%-uber.jar
+set MIN_JAVA_VERSION=@@MIN_JAVA_VERSION@@
 
 echo.
 echo *************************************************************************
@@ -13,7 +16,7 @@ echo **            ^|__/ ^|  ^|  ^|  ^|  ^|   ^|___ ^|__^| ^|  ^| ^|__/ ^|___ ^|
 echo **                                                                     **
 echo **  Data Loader v%DATALOADER_SHORT_VERSION% is a Salesforce supported Open Source project to   **
 echo **  help you import data to and export data from your Salesforce org.  **
-echo **  It requires Zulu OpenJDK 11 to run.                                **
+echo **  It requires Java JRE %MIN_JAVA_VERSION% or later to run.                           **
 echo **                                                                     **
 echo **  Github Project Url:                                                **
 echo **       https://github.com/forcedotcom/dataloader                     **
@@ -23,10 +26,23 @@ echo **                                                                     **
 echo *************************************************************************
 echo.
 
-echo Data Loader installation creates a folder in your '%USERPROFILE%' directory.
-set /p DIR_NAME=Which folder should it use? [default: dataloader] || set DIR_NAME=dataloader
+echo Data Loader installation requires you to provide an installation directory to create a version-specific subdirectory for the installation artifacts.
+echo It uses '%USERPROFILE%\^<relative path^>' as the installation directory if you provide a relative path for the installation directory.
+echo.
+set /p DIR_NAME=Provide the installation directory [default: dataloader] : || set DIR_NAME=dataloader
 
-set INSTALLATION_DIR=%USERPROFILE%\%DIR_NAME%\v%DATALOADER_VERSION%
+if "%DIR_NAME%":~1,1%" == ":" (
+    REM absolute path specified
+    set INSTALLATION_DIR=%DIR_NAME%\v%DATALOADER_VERSION%
+) else (
+    if "%DIR_NAME:~0,1%" == "\" (
+        REM absolute path specified
+        set INSTALLATION_DIR=%DIR_NAME%\v%DATALOADER_VERSION%
+    ) else (
+        REM relative path specified
+        set INSTALLATION_DIR=%USERPROFILE%\%DIR_NAME%\v%DATALOADER_VERSION%
+    )
+)
 
 IF EXIST %INSTALLATION_DIR% (
     goto ExistingDir
